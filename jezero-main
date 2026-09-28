@@ -1,74 +1,428 @@
-DrawLake(
-    pDC,
-    _T("1256234"),
-    CPoint(100, 100),
-    40,
-    RGB(120, 190, 240),
-    RGB(0, 0, 120),
-    _T("JEZERO"),
-    CPoint(180, 180),
-    RGB(0, 0, 0),
-    0);
+int RotateX(double x, double y, CPoint ptCenter, float angle)
+{
+	double angleRad = angle * PI / 180.0;
+	double cosAngle = cos(angleRad);
+	double sinAngle = sin(angleRad);
 
+	return (int)(ptCenter.x + (x - ptCenter.x) * cosAngle - (y - ptCenter.y) * sinAngle);
+}
+
+int RotateY(double x, double y, CPoint ptCenter, float angle)
+{
+	double angleRad = angle * PI / 180.0;
+	double cosAngle = cos(angleRad);
+	double sinAngle = sin(angleRad);
+
+	return (int)(ptCenter.y + (x - ptCenter.x) * sinAngle + (y - ptCenter.y) * cosAngle);
+}
+
+void DrawRotatedLineTo(CDC* pDC,double x,double y,CPoint ptCenter,float lakeRotation)
+{
+	pDC->LineTo(RotateX(x, y, ptCenter, lakeRotation),RotateY(x, y, ptCenter, lakeRotation));
+}
+
+void DrawArcPart(
+	CDC* pDC,
+	double& currentX,
+	double& currentY,
+	double& direction,
+	int radius,
+	double angle,
+	CPoint ptRotationCenter,
+	float lakeRotation)
+{
+	double centerX = currentX - radius * sin(direction);
+	double centerY = currentY + radius * cos(direction);
+
+	double startX = currentX;
+	double startY = currentY;
+
+	int segmentCount = (int)(fabs(angle) / (PI / 36.0));
+
+	if (segmentCount < 8)
+		segmentCount = 8;
+
+	for (int i = 1; i <= segmentCount; i++)
+	{
+		double currentAngle = angle * i / segmentCount;
+
+		double cosAngle = cos(currentAngle);
+		double sinAngle = sin(currentAngle);
+
+		double x = startX - centerX;
+		double y = startY - centerY;
+
+		double nextX =
+			centerX + x * cosAngle - y * sinAngle;
+
+		double nextY =
+			centerY + x * sinAngle + y * cosAngle;
+
+		DrawRotatedLineTo(
+			pDC,
+			nextX,
+			nextY,
+			ptRotationCenter,
+			lakeRotation);
+	}
+
+	double cosEndAngle = cos(angle);
+	double sinEndAngle = sin(angle);
+
+	double endX = startX - centerX;
+	double endY = startY - centerY;
+
+	currentX =
+		centerX + endX * cosEndAngle - endY * sinEndAngle;
+
+	currentY =
+		centerY + endX * sinEndAngle + endY * cosEndAngle;
+
+	direction += angle;
+}
+
+void DrawLakePart(
+	CDC* pDC,
+	wchar_t part,
+	double& currentX,
+	double& currentY,
+	double& direction,
+	int radius,
+	CPoint ptRotationCenter,
+	float lakeRotation)
+{
+	switch (part)
+	{
+	case L'1':
+		direction = 0.0;
+
+		DrawArcPart(
+			pDC,
+			currentX,
+			currentY,
+			direction,
+			radius,
+			PI / 2.0,
+			ptRotationCenter,
+			lakeRotation);
+		break;
+
+	case L'2':
+		direction = PI / 2.0;
+
+		DrawArcPart(
+			pDC,
+			currentX,
+			currentY,
+			direction,
+			radius,
+			PI / 2.0,
+			ptRotationCenter,
+			lakeRotation);
+		break;
+
+	case L'3':
+		direction = PI;
+
+		DrawArcPart(
+			pDC,
+			currentX,
+			currentY,
+			direction,
+			radius,
+			PI / 2.0,
+			ptRotationCenter,
+			lakeRotation);
+		break;
+
+	case L'4':
+		direction = 3.0 * PI / 2.0;
+
+		DrawArcPart(
+			pDC,
+			currentX,
+			currentY,
+			direction,
+			radius,
+			PI / 2.0,
+			ptRotationCenter,
+			lakeRotation);
+		break;
+
+	case L'5':
+		direction = 0.0;
+		currentX += radius;
+
+		DrawRotatedLineTo(
+			pDC,
+			currentX,
+			currentY,
+			ptRotationCenter,
+			lakeRotation);
+		break;
+
+	case L'6':
+		direction = PI / 2.0;
+		currentY += radius;
+
+		DrawRotatedLineTo(
+			pDC,
+			currentX,
+			currentY,
+			ptRotationCenter,
+			lakeRotation);
+		break;
+	}
+}
+
+void DrawLakeInternal(
+	CDC* pDC,
+	CString strParts,
+	CPoint ptStart,
+	int radius,
+	COLORREF colFill,
+	COLORREF colLine,
+	CString strText,
+	CPoint ptTextCenter,
+	COLORREF colText,
+	float lakeRotation,
+	float textRotation)
+{
+	if (pDC == NULL || radius <= 0 || strParts.IsEmpty())
+		return;
+
+	CPen pen(PS_SOLID, 1, colLine);
+
+	CPen* oldPen = pDC->SelectObject(&pen);
+
+	double currentX = ptStart.x;
+	double currentY = ptStart.y;
+	double direction = 0.0;
+
+	// Pocetak putanje
+	pDC->BeginPath();
+
+	pDC->MoveTo(
+		RotateX(
+			currentX,
+			currentY,
+			ptStart,
+			lakeRotation),
+		RotateY(
+			currentX,
+			currentY,
+			ptStart,
+			lakeRotation));
+
+	// Crtanje svih delova
+	for (int i = 0; i < strParts.GetLength(); i++)
+	{
+		DrawLakePart(
+			pDC,
+			strParts[i],
+			currentX,
+			currentY,
+			direction,
+			radius,
+			ptStart,
+			lakeRotation);
+	}
+
+	// NE zatvaramo figuru
+	// pDC->CloseFigure();
+
+	pDC->EndPath();
+
+	// Samo linija, bez popunjavanja
+	pDC->StrokePath();
+
+	pDC->SelectObject(oldPen);
+
+	// ==========================================
+	// TEKST
+	// ==========================================
+
+	LOGFONT logFont = {};
+
+	logFont.lfHeight =
+		-MulDiv(
+			10,
+			pDC->GetDeviceCaps(LOGPIXELSY),
+			72);
+
+	logFont.lfWeight = FW_BOLD;
+
+	logFont.lfEscapement =
+		(LONG)(textRotation * 10);
+
+	logFont.lfOrientation =
+		logFont.lfEscapement;
+
+	_tcscpy_s(
+		logFont.lfFaceName,
+		LF_FACESIZE,
+		_T("Arial"));
+
+	CFont font;
+	font.CreateFontIndirect(&logFont);
+
+	CFont* oldFont = pDC->SelectObject(&font);
+
+	int oldBkMode =
+		pDC->SetBkMode(TRANSPARENT);
+
+	COLORREF oldTextColor =
+		pDC->SetTextColor(colText);
+
+	// Rotacija pozicije teksta zajedno sa jezerom
+	CPoint ptRotatedTextCenter(
+		RotateX(
+			ptTextCenter.x,
+			ptTextCenter.y,
+			ptStart,
+			lakeRotation),
+
+		RotateY(
+			ptTextCenter.x,
+			ptTextCenter.y,
+			ptStart,
+			lakeRotation));
+
+	CSize textSize =
+		pDC->GetTextExtent(strText);
+
+	pDC->TextOut(
+		ptRotatedTextCenter.x - textSize.cx / 2,
+		ptRotatedTextCenter.y - textSize.cy / 2,
+		strText);
+
+	pDC->SetTextColor(oldTextColor);
+	pDC->SetBkMode(oldBkMode);
+
+	pDC->SelectObject(oldFont);
+}
+
+void DrawLake(
+	CDC* pDC,
+	CString strParts,
+	CPoint ptStart,
+	int radius,
+	COLORREF colFill,
+	COLORREF colLine,
+	CString strText,
+	CPoint ptTextCenter,
+	COLORREF colText,
+	float angleRotation)
+{
+	DrawLakeInternal(
+		pDC,
+		strParts,
+		ptStart,
+		radius,
+		colFill,
+		colLine,
+		strText,
+		ptTextCenter,
+		colText,
+		0,
+		angleRotation);
+}
+
+void DrawLakes(
+	CDC* pDC,
+	CString arParts[],
+	CPoint arPtStart[],
+	int arRadius[],
+	COLORREF arColFill[],
+	COLORREF arColLine[],
+	CString arStrText[],
+	CPoint arPtTextCenter[],
+	COLORREF arColText[],
+	float arRotation[],
+	int length)
+{
+	if (pDC == NULL)
+		return;
+
+	for (int i = 0; i < length; i++)
+	{
+		DrawLakeInternal(
+			pDC,
+			arParts[i],
+			arPtStart[i],
+			arRadius[i],
+			arColFill[i],
+			arColLine[i],
+			arStrText[i],
+			arPtTextCenter[i],
+			arColText[i],
+			arRotation[i],
+			0);
+	}
+}
+
+----------------------
 CString arParts[2] =
 {
-    _T("1256234"),
-    _T("123456")
+	_T("163"),
+	_T("123456")
 };
 
 CPoint arPtStart[2] =
 {
-    CPoint(100, 100),
-    CPoint(350, 150)
+	CPoint(100, 100),
+	CPoint(350, 150)
 };
 
 int arRadius[2] = { 40, 30 };
 
 COLORREF arColFill[2] =
 {
-    RGB(120, 190, 240),
-    RGB(160, 220, 160)
+	RGB(120, 190, 240),
+	RGB(160, 220, 160)
 };
 
 COLORREF arColLine[2] =
 {
-    RGB(0, 0, 120),
-    RGB(0, 100, 0)
+	RGB(0, 0, 120),
+	RGB(0, 100, 0)
 };
 
 CString arStrText[2] =
 {
-    _T("JEZERO 1"),
-    _T("JEZERO 2")
+	_T("JEZERO 1"),
+	_T("JEZERO 2")
 };
 
 CPoint arPtTextCenter[2] =
 {
-    CPoint(180, 180),
-    CPoint(410, 220)
+	CPoint(180, 180),
+	CPoint(410, 220)
 };
 
 COLORREF arColText[2] =
 {
-    RGB(0, 0, 0),
-    RGB(80, 0, 0)
+	RGB(0, 0, 0),
+	RGB(80, 0, 0)
 };
 
 float arRotation[2] =
 {
-    0,
-    30
+	0,
+	30
 };
 
 DrawLakes(
-    pDC,
-    arParts,
-    arPtStart,
-    arRadius,
-    arColFill,
-    arColLine,
-    arStrText,
-    arPtTextCenter,
-    arColText,
-    arRotation,
-    2);
+	pDC,
+	arParts,
+	arPtStart,
+	arRadius,
+	arColFill,
+	arColLine,
+	arStrText,
+	arPtTextCenter,
+	arColText,
+	arRotation,
+	2);
+// snimanje SVE POSLE crtanja
+SavePicture(pDC, CRect(0, 0, 400, 500), _T("C:\\Users\\marija.todorovic\\Downloads\\RG_blanketi_pismeni_uradjeni\\upload\\GDI/"));
