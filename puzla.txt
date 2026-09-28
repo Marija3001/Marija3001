@@ -1,0 +1,285 @@
+void DrawPuzzle(
+    CDC* pDC,
+    CRect rcPuzzle,
+    int nRows,
+    int nCols,
+    float ratio,
+    CString sPicture,
+    bool** matOpen,
+    COLORREF** matColors)
+{
+    if (pDC == NULL || nRows <= 0 || nCols <= 0 || ratio <= 0)
+        return;
+
+    int savedDc = pDC->SaveDC();
+
+    pDC->IntersectClipRect(rcPuzzle);
+
+    // Draw background image.
+    CImage image;
+
+    if (SUCCEEDED(image.Load(sPicture)))
+    {
+        pDC->StretchBlt(
+            rcPuzzle.left,
+            rcPuzzle.top,
+            rcPuzzle.Width(),
+            rcPuzzle.Height(),
+            CDC::FromHandle(image.GetDC()),
+            0,
+            0,
+            image.GetWidth(),
+            image.GetHeight(),
+            SRCCOPY);
+
+        image.ReleaseDC();
+    }
+
+    double trapezoidWidth = (double)rcPuzzle.Width() / nCols;
+    double trapezoidHeight = (double)rcPuzzle.Height() / nRows;
+
+    // ratio = base / slanted-side
+    double slantedSide = trapezoidWidth / ratio;
+    double value = slantedSide * slantedSide - trapezoidHeight * trapezoidHeight;
+
+    double horizontalOffset;
+
+    if (value > 0)
+        horizontalOffset = sqrt(value);
+    else
+        horizontalOffset = trapezoidWidth / 4.0;
+
+    if (horizontalOffset > trapezoidWidth / 2.0 - 1)
+        horizontalOffset = trapezoidWidth / 4.0;
+
+    CPen linePen(PS_SOLID, 1, RGB(0, 0, 0));
+    CPen* oldPen = pDC->SelectObject(&linePen);
+
+    for (int row = 0; row < nRows; row++)
+    {
+        for (int col = 0; col < nCols; col++)
+        {
+            double x = rcPuzzle.left + col * trapezoidWidth;
+            double y = rcPuzzle.top + row * trapezoidHeight;
+
+            CPoint trapezoid[4];
+
+            // Alternate trapezoid orientation by row.
+            if (row % 2 == 0)
+            {
+                trapezoid[0] = CPoint((int)(x + horizontalOffset), (int)y);
+                trapezoid[1] = CPoint((int)(x + trapezoidWidth - horizontalOffset), (int)y);
+                trapezoid[2] = CPoint((int)(x + trapezoidWidth), (int)(y + trapezoidHeight));
+                trapezoid[3] = CPoint((int)x, (int)(y + trapezoidHeight));
+            }
+            else
+            {
+                trapezoid[0] = CPoint((int)x, (int)y);
+                trapezoid[1] = CPoint((int)(x + trapezoidWidth), (int)y);
+                trapezoid[2] = CPoint((int)(x + trapezoidWidth - horizontalOffset), (int)(y + trapezoidHeight));
+                trapezoid[3] = CPoint((int)(x + horizontalOffset), (int)(y + trapezoidHeight));
+            }
+
+            // true = open trapezoid: background remains visible.
+            if (matOpen[row][col])
+            {
+                pDC->MoveTo(trapezoid[0]);
+
+                for (int i = 1; i < 4; i++)
+                    pDC->LineTo(trapezoid[i]);
+
+                pDC->LineTo(trapezoid[0]);
+            }
+            else
+            {
+                CBrush brush(matColors[row][col]);
+                CBrush* oldBrush = pDC->SelectObject(&brush);
+
+                pDC->Polygon(trapezoid, 4);
+
+                pDC->SelectObject(oldBrush);
+            }
+        }
+    }
+
+    pDC->SelectObject(oldPen);
+    pDC->RestoreDC(savedDc);
+}
+void DrawEndText(
+    CDC* pDC,
+    CRect rcPuzzle,
+    CString sText,
+    int fnSize,
+    COLORREF clrText)
+{
+    if (pDC == NULL || sText.IsEmpty() || fnSize <= 0)
+        return;
+
+    double radius = rcPuzzle.Height() * 0.8;
+
+    double centerX = (rcPuzzle.left + rcPuzzle.right) / 2.0;
+
+    // The circle center is below the Puzzle rectangle.
+    double centerY = rcPuzzle.bottom + rcPuzzle.Height() * 0.8;
+
+    LOGFONT logFont = {};
+
+    logFont.lfHeight =
+        -MulDiv(
+            fnSize,
+            pDC->GetDeviceCaps(LOGPIXELSY),
+            72);
+
+    logFont.lfWeight = FW_BOLD;
+
+    _tcscpy_s(
+        logFont.lfFaceName,
+        LF_FACESIZE,
+        _T("Verdana"));
+
+    int oldBkMode = pDC->SetBkMode(TRANSPARENT);
+    COLORREF oldTextColor = pDC->SetTextColor(clrText);
+
+    int textLength = sText.GetLength();
+
+    for (int i = 0; i < textLength; i++)
+    {
+        double angle;
+
+        if (textLength == 1)
+            angle = 270.0;
+        else
+            angle = 180.0 + 180.0 * i / (textLength - 1);
+
+        double angleRad = angle * PI / 180.0;
+
+        int x = (int)(centerX + radius * cos(angleRad));
+        int y = (int)(centerY + radius * sin(angleRad));
+
+        // Tangent rotation keeps letters arranged along the semicircle.
+        logFont.lfEscapement = (LONG)((angle + 90.0) * 10);
+        logFont.lfOrientation = logFont.lfEscapement;
+
+        CFont font;
+        font.CreateFontIndirect(&logFont);
+
+        CFont* oldFont = pDC->SelectObject(&font);
+
+        CString letter = sText.Mid(i, 1);
+        CSize letterSize = pDC->GetTextExtent(letter);
+
+        pDC->TextOut(
+            x - letterSize.cx / 2,
+            y - letterSize.cy / 2,
+            letter);
+
+        pDC->SelectObject(oldFont);
+    }
+
+    pDC->SetTextColor(oldTextColor);
+    pDC->SetBkMode(oldBkMode);
+}
+void SavePuzzle(
+    CDC* pDC,
+    CRect rcPuzzle,
+    CString sFile)
+{
+    if (pDC == NULL || rcPuzzle.Width() <= 0 || rcPuzzle.Height() <= 0)
+        return;
+
+    CImage image;
+
+    image.Create(
+        rcPuzzle.Width(),
+        rcPuzzle.Height(),
+        32);
+
+    BitBlt(
+        image.GetDC(),
+        0,
+        0,
+        rcPuzzle.Width(),
+        rcPuzzle.Height(),
+        pDC->GetSafeHdc(),
+        rcPuzzle.left,
+        rcPuzzle.top,
+        SRCCOPY);
+
+    image.ReleaseDC();
+
+    // Use a full file name, for example C:\Temp\Puzzle.png.
+    image.Save(sFile);
+}
+
+//poziv
+int nRows = 6;
+int nCols = 7;
+
+bool** matOpen = new bool*[nRows];
+COLORREF** matColors = new COLORREF*[nRows];
+
+for (int row = 0; row < nRows; row++)
+{
+    matOpen[row] = new bool[nCols];
+    matColors[row] = new COLORREF[nCols];
+
+    for (int col = 0; col < nCols; col++)
+    {
+        matOpen[row][col] = true;
+        matColors[row][col] = RGB(160, 160, 160);
+    }
+}
+
+// Closed, coloured pieces.
+matOpen[2][2] = false;
+matOpen[2][3] = false;
+matOpen[3][2] = false;
+matOpen[3][3] = false;
+
+matColors[2][2] = RGB(30, 30, 30);
+matColors[2][3] = RGB(30, 30, 30);
+matColors[3][2] = RGB(30, 30, 30);
+matColors[3][3] = RGB(30, 30, 30);
+
+CRect rcPuzzle(100, 100, 700, 550);
+
+DrawPuzzle(
+    pDC,
+    rcPuzzle,
+    nRows,
+    nCols,
+    1.5f,
+    _T("C:\\Temp\\Background.jpg"),
+    matOpen,
+    matColors);
+
+DrawEndText(
+    pDC,
+    rcPuzzle,
+    _T("Your score is 10 points"),
+    16,
+    RGB(80, 80, 80));
+
+SavePuzzle(
+    pDC,
+    rcPuzzle,
+    _T("C:\\Temp\\Puzzle.png"));
+
+Cleanup after drawing:
+
+
+C++
+
+
+
+
+```
+for (int row = 0; row < nRows; row++)
+{
+    delete[] matOpen[row];
+    delete[] matColors[row];
+}
+
+delete[] matOpen;
+delete[] matColors;
+```
