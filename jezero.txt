@@ -1,0 +1,232 @@
+#include <afxwin.h>
+#include <atlimage.h>
+#include <cmath>
+
+namespace
+{
+    constexpr double Pi = 3.14159265358979323846;
+
+    struct PointD
+    {
+        double X;
+        double Y;
+    };
+
+    PointD Rotate(PointD point, PointD center, double angle)
+    {
+        const double cosAngle = std::cos(angle);
+        const double sinAngle = std::sin(angle);
+        const double x = point.X - center.X;
+        const double y = point.Y - center.Y;
+
+        return
+        {
+            center.X + x * cosAngle - y * sinAngle,
+            center.Y + x * sinAngle + y * cosAngle
+        };
+    }
+
+    void DrawArcPart(CDC* pDC, PointD& point, double& direction, int radius, double angle)
+    {
+        // Positive angle represents a clockwise turn in the screen coordinate system.
+        const PointD center =
+        {
+            point.X - radius * std::sin(direction),
+            point.Y + radius * std::cos(direction)
+        };
+
+        const PointD start = point;
+        const int segmentCount = max(8, static_cast<int>(std::abs(angle) / (Pi / 36.0)));
+
+        for (int i = 1; i <= segmentCount; ++i)
+        {
+            const PointD nextPoint = Rotate(start, center, angle * i / segmentCount);
+            pDC->LineTo(
+                static_cast<int>(std::lround(nextPoint.X)),
+                static_cast<int>(std::lround(nextPoint.Y)));
+        }
+
+        point = Rotate(start, center, angle);
+        direction += angle;
+    }
+
+    void DrawLakePart(CDC* pDC, wchar_t part, PointD& point, double& direction, int radius)
+    {
+        switch (part)
+        {
+            case L'1':
+                DrawArcPart(pDC, point, direction, radius, Pi / 2.0);
+                break;
+
+            case L'2':
+                DrawArcPart(pDC, point, direction, radius, Pi);
+                break;
+
+            case L'3':
+                DrawArcPart(pDC, point, direction, radius, 3.0 * Pi / 2.0);
+                break;
+
+            case L'4':
+                DrawArcPart(pDC, point, direction, radius, 2.0 * Pi);
+                break;
+
+            case L'5':
+                point.X += radius * std::cos(direction);
+                point.Y += radius * std::sin(direction);
+                pDC->LineTo(
+                    static_cast<int>(std::lround(point.X)),
+                    static_cast<int>(std::lround(point.Y)));
+                break;
+
+            case L'6':
+                point.X += radius * std::cos(direction);
+                point.Y += radius * std::sin(direction);
+                pDC->LineTo(
+                    static_cast<int>(std::lround(point.X)),
+                    static_cast<int>(std::lround(point.Y)));
+                break;
+        }
+    }
+}
+void DrawLake(
+    CDC* pDC,
+    CString strParts,
+    CPoint ptStart,
+    int radius,
+    COLORREF colFill,
+    COLORREF colLine,
+    CString strText,
+    CPoint ptTextCenter,
+    COLORREF colText,
+    float angleRotation)
+{
+    if (pDC == nullptr || radius <= 0 || strParts.IsEmpty())
+        return;
+
+    CPen pen(PS_SOLID, 1, colLine);
+    CBrush brush(colFill);
+
+    CPen* oldPen = pDC->SelectObject(&pen);
+    CBrush* oldBrush = pDC->SelectObject(&brush);
+
+    PointD currentPoint = { static_cast<double>(ptStart.x), static_cast<double>(ptStart.y) };
+    double direction = 0.0;
+
+    pDC->BeginPath();
+    pDC->MoveTo(ptStart);
+
+    for (int i = 0; i < strParts.GetLength(); ++i)
+        DrawLakePart(pDC, strParts[i], currentPoint, direction, radius);
+
+    pDC->CloseFigure();
+    pDC->EndPath();
+    pDC->StrokeAndFillPath();
+
+    pDC->SelectObject(oldBrush);
+    pDC->SelectObject(oldPen);
+
+    LOGFONT logFont = {};
+    logFont.lfHeight = -MulDiv(10, pDC->GetDeviceCaps(LOGPIXELSY), 72);
+    logFont.lfWeight = FW_BOLD;
+    logFont.lfEscapement = static_cast<LONG>(angleRotation * 10.0f);
+    logFont.lfOrientation = logFont.lfEscapement;
+    wcscpy_s(logFont.lfFaceName, LF_FACESIZE, L"Arial");
+
+    CFont font;
+    font.CreateFontIndirect(&logFont);
+
+    CFont* oldFont = pDC->SelectObject(&font);
+    const int oldBkMode = pDC->SetBkMode(TRANSPARENT);
+    const COLORREF oldTextColor = pDC->SetTextColor(colText);
+
+    const CSize textSize = pDC->GetTextExtent(strText);
+    pDC->TextOut(
+        ptTextCenter.x - textSize.cx / 2,
+        ptTextCenter.y - textSize.cy / 2,
+        strText);
+
+    pDC->SetTextColor(oldTextColor);
+    pDC->SetBkMode(oldBkMode);
+    pDC->SelectObject(oldFont);
+}
+void DrawLakes(
+    CDC* pDC,
+    CString arParts[],
+    CPoint arPtStart[],
+    int arRadius[],
+    COLORREF arColFill[],
+    COLORREF arColLine[],
+    CString arStrText[],
+    CPoint arPtTextCenter[],
+    COLORREF arColText[],
+    float arRotation[],
+    int length)
+{
+    if (pDC == nullptr)
+        return;
+
+    for (int i = 0; i < length; ++i)
+    {
+        const int savedDc = pDC->SaveDC();
+        pDC->SetGraphicsMode(GM_ADVANCED);
+
+        const double angle = arRotation[i] * Pi / 180.0;
+        const double cosAngle = std::cos(angle);
+        const double sinAngle = std::sin(angle);
+
+        const double centerX = arPtStart[i].x;
+        const double centerY = arPtStart[i].y;
+
+        XFORM transform = {};
+        transform.eM11 = static_cast<FLOAT>(cosAngle);
+        transform.eM12 = static_cast<FLOAT>(sinAngle);
+        transform.eM21 = static_cast<FLOAT>(-sinAngle);
+        transform.eM22 = static_cast<FLOAT>(cosAngle);
+        transform.eDx = static_cast<FLOAT>(centerX - centerX * cosAngle + centerY * sinAngle);
+        transform.eDy = static_cast<FLOAT>(centerY - centerX * sinAngle - centerY * cosAngle);
+
+        pDC->ModifyWorldTransform(&transform, MWT_LEFTMULTIPLY);
+
+        DrawLake(
+            pDC,
+            arParts[i],
+            arPtStart[i],
+            arRadius[i],
+            arColFill[i],
+            arColLine[i],
+            arStrText[i],
+            arPtTextCenter[i],
+            arColText[i],
+            -arRotation[i]); // Cancels lake rotation so the text remains horizontal.
+
+        pDC->RestoreDC(savedDc);
+    }
+}
+void SetPicture(CDC* pDC, CRect rcView, CString strPicture)
+{
+    if (pDC == nullptr || rcView.Width() <= 0 || rcView.Height() <= 0)
+        return;
+
+    CImage image;
+    image.Create(rcView.Width(), rcView.Height(), 32);
+
+    CDC memoryDc;
+    memoryDc.CreateCompatibleDC(pDC);
+
+    HGDIOBJ oldBitmap = memoryDc.SelectObject(image.GetHBITMAP());
+
+    memoryDc.BitBlt(
+        0,
+        0,
+        rcView.Width(),
+        rcView.Height(),
+        pDC,
+        rcView.left,
+        rcView.top,
+        SRCCOPY);
+
+    memoryDc.SelectObject(oldBitmap);
+
+    // Extension determines format, e.g. .png, .bmp or .jpg.
+    image.Save(strPicture);
+}
